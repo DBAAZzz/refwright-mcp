@@ -1,0 +1,51 @@
+{
+  "name": "refwright-mcp",
+  "version": "1.0.0",
+  "description": "Fast, accurate browser automation MCP server: ref-based targeting, smart settle and incremental ARIA snapshots on Playwright.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "refwright-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "browser",
+    "playwright",
+    "aria",
+    "accessibility",
+    "automation",
+    "ai-agent"
+  ],
+  "author": "DBAAZzz",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DBAAZzz/refwright-mcp.git"
+  },
+  "homepage": "https://github.com/DBAAZzz/refwright-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/DBAAZzz/refwright-mcp/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "playwright-core": "^1.64.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  }
+}
