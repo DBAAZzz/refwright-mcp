@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { diffSnapshots } from "./snapshot.js";
 import { ACTION_SETTLE, NAVIGATION_SETTLE, runAndSettle } from "./settle.js";
+import { CHROME_OWNER_ARG, startChromeWatchdog } from "./watchdog.js";
 
 export interface TabInfo {
   id: string;
@@ -33,6 +34,8 @@ export interface LocateOptions {
 export class BrowserManager {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
+  private launching: Promise<{ browser: Browser; context: BrowserContext }> | null = null;
+  private stopWatchdog: (() => void) | null = null;
   private tabs: Map<string, Page> = new Map();
   private pageToId: Map<Page, string> = new Map();
   private activeTabId: string | null = null;
@@ -115,46 +118,58 @@ export class BrowserManager {
   }
 
   public async getBrowser(): Promise<{ browser: Browser; context: BrowserContext }> {
-    if (!this.browser || !this.context) {
-      const executablePath = this.findChromeExecutable();
-      const headless = process.env.BROWSER_HEADLESS === "true";
-
-      const launchOptions: any = {
-        headless,
-        args: [
-          "--disable-blink-features=AutomationControlled",
-          "--no-default-browser-check",
-          "--no-first-run",
-        ],
-      };
-      if (executablePath) {
-        launchOptions.executablePath = executablePath;
-      } else {
-        launchOptions.channel = "chrome";
-      }
-
-      const proxy = this.detectProxy();
-      if (proxy) {
-        launchOptions.proxy = {
-          server: proxy,
-          bypass: "<-loopback>,localhost,127.0.0.1",
-        };
-      }
-
-      this.browser = await chromium.launch(launchOptions);
-
-      this.context = await this.browser.newContext({
-        viewport: { width: 1280, height: 800 },
-        userAgent:
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-      });
-
-      // Listen for popup / new tabs and auto-focus
-      this.context.on("page", (newPage) => {
-        const id = this.registerPage(newPage);
-        this.activeTabId = id;
-      });
+    if (this.browser && this.context) {
+      return { browser: this.browser, context: this.context };
     }
+    // Concurrent callers share one launch; otherwise each would start its own Chrome and
+    // all but the last would be left running unreferenced.
+    this.launching ??= this.launchBrowser().finally(() => {
+      this.launching = null;
+    });
+    return this.launching;
+  }
+
+  private async launchBrowser(): Promise<{ browser: Browser; context: BrowserContext }> {
+    const executablePath = this.findChromeExecutable();
+    const headless = process.env.BROWSER_HEADLESS === "true";
+
+    const launchOptions: any = {
+      headless,
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        "--no-default-browser-check",
+        "--no-first-run",
+        CHROME_OWNER_ARG,
+      ],
+    };
+    if (executablePath) {
+      launchOptions.executablePath = executablePath;
+    } else {
+      launchOptions.channel = "chrome";
+    }
+
+    const proxy = this.detectProxy();
+    if (proxy) {
+      launchOptions.proxy = {
+        server: proxy,
+        bypass: "<-loopback>,localhost,127.0.0.1",
+      };
+    }
+
+    this.browser = await chromium.launch(launchOptions);
+    this.stopWatchdog = startChromeWatchdog();
+
+    this.context = await this.browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      userAgent:
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    });
+
+    // Listen for popup / new tabs and auto-focus
+    this.context.on("page", (newPage) => {
+      const id = this.registerPage(newPage);
+      this.activeTabId = id;
+    });
 
     return { browser: this.browser, context: this.context };
   }
@@ -444,6 +459,8 @@ export class BrowserManager {
       await this.browser.close().catch(() => {});
       this.browser = null;
     }
+    this.stopWatchdog?.();
+    this.stopWatchdog = null;
     this.tabs.clear();
     this.pageToId.clear();
     this.activeTabId = null;

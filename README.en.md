@@ -69,6 +69,7 @@ Nodes missing from an incremental snapshot are unchanged, and their refs stay va
 - 🧭 **Built-in usage guidance**: the server sends MCP `instructions` telling any connected agent how to use the tools efficiently.
 - 🚀 **Uses your local Chrome**: built on `playwright-core`, auto-detects the installed Chrome — no separate browser download. Picks up the system proxy.
 - 📑 **Multi-tab**: new tabs and popups are tracked and focused automatically; list, switch and close tabs.
+- 🧹 **No orphaned Chrome**: the browser is closed when the client disconnects or the server is signalled; even if the server is `kill -9`ed or crashes, a detached watchdog reaps its Chrome within seconds without touching other instances.
 
 ---
 
@@ -176,10 +177,12 @@ src/
 ├── tools.ts      # tool schemas (zod) and dispatch
 ├── browser.ts    # browser/tab management, locating, snapshots
 ├── settle.ts     # smart settle: navigation / request / DOM stability
-└── snapshot.ts   # incremental snapshot diffing
+├── snapshot.ts   # incremental snapshot diffing
+└── watchdog.ts   # watchdog that reaps Chrome after an abnormal server exit
 test/
 ├── snapshot.test.mjs  # diff unit tests
-└── e2e.test.mjs       # real-browser end-to-end tests
+├── e2e.test.mjs       # real-browser end-to-end tests
+└── lifecycle.test.mjs # process lifecycle: disconnect, SIGKILL, multiple instances, concurrent launch
 ```
 
 ## License

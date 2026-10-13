@@ -13,6 +13,8 @@ const USAGE_INSTRUCTIONS = `Browser automation driven by ARIA snapshots. To work
 - Use x/y coordinates and browser_screenshot only for canvas, games or visual checks; prefer refs everywhere else.
 - Pass skip_snapshot: true for intermediate steps whose result you don't need to see.`;
 
+const SHUTDOWN_TIMEOUT_MS = 5000;
+
 async function main() {
   const browserManager = new BrowserManager();
   const dispatcher = new ToolDispatcher(browserManager);
@@ -52,13 +54,22 @@ async function main() {
     );
   }
 
-  // Handle process shutdown
-  const cleanup = async () => {
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    // If Chrome hangs while closing, exit anyway; the watchdog then kills it.
+    setTimeout(() => process.exit(0), SHUTDOWN_TIMEOUT_MS);
     await browserManager.closeAll();
     process.exit(0);
   };
-  process.on("SIGINT", cleanup);
-  process.on("SIGTERM", cleanup);
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  process.on("SIGHUP", shutdown);
+  // MCP clients usually disconnect by closing our stdin rather than sending a signal, and
+  // the stdio transport doesn't react to that, so the server and its Chrome would linger.
+  process.stdin.on("end", shutdown);
+  process.stdin.on("close", shutdown);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

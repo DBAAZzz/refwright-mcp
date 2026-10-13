@@ -69,6 +69,7 @@ Removed:
 - 🧭 **自带使用策略**：服务端通过 MCP `instructions` 告诉接入的 Agent 如何高效使用这些工具，任何 MCP 客户端都会收到。
 - 🚀 **复用本机 Chrome**：依赖 `playwright-core`，自动检测本机安装的 Chrome，不需要额外下载浏览器；自动读取系统代理。
 - 📑 **多标签页**：自动接管弹出的新标签页并切换过去，支持列出、切换、关闭标签页。
+- 🧹 **不残留 Chrome 进程**：客户端断开、收到退出信号时会关闭浏览器；即使 MCP 进程被 `kill -9` 或崩溃，独立的守护脚本也会在几秒内清理掉它启动的 Chrome，并且不会影响其他实例的浏览器。
 
 ---
 
@@ -178,10 +179,12 @@ src/
 ├── tools.ts      # 工具定义（zod schema）与分发
 ├── browser.ts    # 浏览器与标签页管理、定位、快照
 ├── settle.ts     # 智能等待：跳转 / 请求 / DOM 稳定性检测
-└── snapshot.ts   # 增量快照对比
+├── snapshot.ts   # 增量快照对比
+└── watchdog.ts   # 守护脚本：MCP 进程异常退出后清理 Chrome
 test/
 ├── snapshot.test.mjs  # 增量对比单元测试
-└── e2e.test.mjs       # 真实浏览器端到端测试
+├── e2e.test.mjs       # 真实浏览器端到端测试
+└── lifecycle.test.mjs # 进程生命周期测试：断开、强杀、多实例、并发启动
 ```
 
 ## License
