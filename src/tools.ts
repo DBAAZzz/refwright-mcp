@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Page } from "playwright-core";
+import type { Locator, Page } from "playwright-core";
 import type { BrowserManager } from "./browser.js";
 
 const refParam = z
@@ -162,6 +162,17 @@ export const toolSchemas = {
     }),
   },
 
+  browser_upload: {
+    description:
+      "Upload local files into a file input. File inputs are usually hidden and absent from snapshots, so by default the page's only <input type=file> is used; pass `selector` (or `ref`) when there are several. Use this instead of clicking upload buttons, which would open the OS file picker. Returns an incremental snapshot of what changed.",
+    parameters: z.object({
+      paths: z.array(z.string()).min(1).describe("Absolute paths of the files to upload."),
+      ref: refParam,
+      selector: z.string().optional().describe("CSS selector of the file input, needed only when the page has several."),
+      skip_snapshot: z.boolean().optional().describe("Fast mode: return immediately without waiting or snapshot."),
+    }),
+  },
+
   browser_scroll: {
     description:
       "Scroll the active page up, down, to top, or to bottom. Returns an updated ARIA snapshot of the visible content.",
@@ -231,6 +242,13 @@ export type ToolResponse =
       isError: boolean;
       content: Array<{ type: "text"; text: string }>;
     };
+
+// A Buffer nested in a script result would serialize as a huge byte array and flood the
+// model's context; images are only viewable when returned on their own.
+const omitBinary = (_key: string, value: unknown) =>
+  value && typeof value === "object" && (value as { type?: unknown }).type === "Buffer" && Array.isArray((value as { data?: unknown }).data)
+    ? "[binary data omitted — return a screenshot on its own to view it]"
+    : value;
 
 const textResponse = (text: string): ToolResponse => ({ content: [{ type: "text" as const, text }] });
 
@@ -388,6 +406,27 @@ export class ToolDispatcher {
         });
       }
 
+      case "browser_upload": {
+        return this.act(args.skip_snapshot, async (page) => {
+          let target: Locator;
+          let note = "";
+          if (args.ref || args.selector) {
+            ({ target, note } = await this.browserManager.locateOne(page, { ref: args.ref, selector: args.selector }));
+          } else {
+            target = page.locator('input[type="file"]');
+            const count = await target.count();
+            if (count === 0) {
+              throw new Error("No file input on the page. Open the page's upload area first, then call browser_upload again.");
+            }
+            if (count > 1) {
+              throw new Error(`The page has ${count} file inputs. Pass \`selector\` to choose one, e.g. 'input[type=file] >> nth=1'.`);
+            }
+          }
+          await target.setInputFiles(args.paths, { timeout: 5000 });
+          return `Uploaded ${args.paths.length} file(s)${note}.`;
+        });
+      }
+
       case "browser_scroll": {
         return this.act(args.skip_snapshot, async (page) => {
           const amount = args.amount ?? 500;
@@ -468,66 +507,46 @@ export class ToolDispatcher {
           },
           evaluate: (fn: any, ...evalArgs: any[]) => page.evaluate(fn, ...evalArgs),
           delay: (ms: number) => page.waitForTimeout(ms),
-          screenshot: async (fullPage = false) => {
-            const buf = await page.screenshot({ fullPage });
-            return buf.toString("base64");
-          },
+          // Returned alone, a Buffer becomes an image block the model can see.
+          screenshot: (fullPage = false) => page.screenshot({ fullPage }),
         };
 
         const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
         const fn = new AsyncFunction(...Object.keys(helpers), args.script);
 
-        try {
-          const result = await fn(...Object.values(helpers));
+        const result = await fn(...Object.values(helpers));
 
-          if (result && typeof result === "object" && result.__image) {
-            return {
-              content: [
-                {
-                  type: "image" as const,
-                  data: result.__image,
-                  mimeType: "image/png",
-                },
-              ],
-            };
-          }
-
-          if (Buffer.isBuffer(result)) {
-            return {
-              content: [
-                {
-                  type: "image" as const,
-                  data: result.toString("base64"),
-                  mimeType: "image/png",
-                },
-              ],
-            };
-          }
-
+        if (result && typeof result === "object" && result.__image) {
           return {
             content: [
               {
-                type: "text" as const,
-                text:
-                  typeof result === "string"
-                    ? result
-                    : result === undefined
-                    ? "Script executed successfully (returned undefined)."
-                    : JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        } catch (scriptErr: any) {
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: `Script Execution Error: ${scriptErr instanceof Error ? scriptErr.stack || scriptErr.message : String(scriptErr)}`,
+                type: "image" as const,
+                data: result.__image,
+                mimeType: "image/png",
               },
             ],
           };
         }
+
+        if (Buffer.isBuffer(result)) {
+          return {
+            content: [
+              {
+                type: "image" as const,
+                data: result.toString("base64"),
+                mimeType: "image/png",
+              },
+            ],
+          };
+        }
+
+        return textResponse(
+          typeof result === "string"
+            ? result
+            : result === undefined
+            ? "Script executed successfully (returned undefined)."
+            : JSON.stringify(result, omitBinary, 2)
+        );
       }
 
       case "browser_tabs": {

@@ -64,6 +64,7 @@ Removed:
 - 🔖 **ref 精确定位**：快照里的 `[ref=eN]` 可以直接传给 click / fill / select / check / hover。iframe 内的元素同样支持。ref 失效时会立即报错，并提示改用最新快照里的 ref，不会卡到超时。
 - ⏱ **智能等待**：动作执行后依次等待：它触发的页面跳转完成、它发出的 fetch/XHR 请求全部返回、DOM 连续 100 ms 没有结构性变化。纯文本变化和 style 动画（时钟、行情、轮播）不会拖慢等待。
 - ✂️ **增量快照**：动作类工具只返回变化的节点、它们的上级节点，以及被删除的节点。页面跳转后，或者增量结果不比完整快照小多少时，自动改回返回完整快照。
+- 🩺 **出错即带现场**：任何工具出错时，都会附带当前页面的完整快照，Agent 可以直接据此纠正，不用再花一个回合去探查页面。
 - ⚡ **脚本批处理**：`browser_run_script` 可以把多步确定的操作放进一次调用完成，省掉多轮往返。
 - 🎯 **语义定位 + 坐标定位**：普通页面按语义或 ref 操作，Canvas、小游戏、滑块验证等场景支持坐标点击和拖拽。
 - 🧭 **自带使用策略**：服务端通过 MCP `instructions` 告诉接入的 Agent 如何高效使用这些工具，任何 MCP 客户端都会收到。
@@ -123,6 +124,7 @@ claude mcp add refwright -- node /absolute/path/to/refwright-mcp/dist/index.js
 | `browser_fill` | `value`、`ref`、`role`、`name`、`label`、`placeholder`、`selector`、`press_enter`、`skip_snapshot` | 填写输入框，可选填写后按回车 |
 | `browser_select` | `value`、`ref`、`name`、`label`、`selector`、`testId`、`skip_snapshot` | 选择下拉框选项 |
 | `browser_check` | `checked`、`ref`、`name`、`label`、`selector`、`testId`、`skip_snapshot` | 勾选或取消勾选复选框、单选框 |
+| `browser_upload` | `paths`、`ref`、`selector`、`skip_snapshot` | 上传本地文件。文件输入框通常是隐藏的、快照里看不到，因此默认自动使用页面上唯一的那个；有多个时用 `selector` 指定。不会弹出系统文件选择框 |
 | `browser_hover` | `ref`、`role`、`name`、`text`、`selector`、`testId`、`x`、`y`、`skip_snapshot` | 悬停，用于触发下拉菜单、提示框 |
 | `browser_press` | `key`、`skip_snapshot` | 按键，如 `Enter`、`Escape`、`Tab`、`ArrowDown` |
 | `browser_scroll` | `direction`（`up`/`down`/`top`/`bottom`）、`amount`、`skip_snapshot` | 滚动页面 |
@@ -130,7 +132,7 @@ claude mcp add refwright -- node /absolute/path/to/refwright-mcp/dist/index.js
 | `browser_set_viewport` | `width`、`height` | 设置视口尺寸（320–3840 × 320–2160） |
 | `browser_screenshot` | `full_page`、`save_path` | 截图（PNG），可选保存到本地 |
 | `browser_evaluate` | `script` | 在页面上下文中执行 JavaScript |
-| `browser_run_script` | `script` | 在 Node 端执行 Playwright 脚本，一次调用完成多步操作。可用变量：`page`、`context`、`browser`、`tabId`、`getSnapshot`、`getByRef`、`getByRole`、`getByText`、`getByTestId`、`locator`、`click`、`fill`、`evaluate`、`delay`、`screenshot` |
+| `browser_run_script` | `script` | 在 Node 端执行 Playwright 脚本，一次调用完成多步操作，适合目标元素已经在快照里看到过的场景。脚本单独返回 `screenshot()` 的结果时，会以图片形式返回。可用变量：`page`、`context`、`browser`、`tabId`、`getSnapshot`、`getByRef`、`getByRole`、`getByText`、`getByTestId`、`locator`、`click`、`fill`、`evaluate`、`delay`、`screenshot` |
 | `browser_tabs` | `action`（`list`/`switch`/`close`）、`tab_id` | 管理标签页 |
 
 **定位优先级**：`ref` > `selector` > `testId` > `role`+`name`/`text` > `label` > `placeholder` > `text` > `role`。

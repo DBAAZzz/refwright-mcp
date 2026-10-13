@@ -400,6 +400,19 @@ export class BrowserManager {
     return `${message}\n\n${await this.getAriaSnapshot(page, tabId, true)}`;
   }
 
+  /**
+   * Full snapshot of the active tab to attach to an error, so the model can recover without
+   * spending a turn on browser_snapshot. Full rather than incremental: an error means the
+   * model's picture of the page is wrong, and it may never have seen the diff baseline.
+   * Returns "" when no browser is running; never throws.
+   */
+  public async snapshotForError(): Promise<string> {
+    const tabId = this.activeTabId;
+    const page = tabId ? this.tabs.get(tabId) : undefined;
+    if (!this.browser || !tabId || !page) return "";
+    return this.getAriaSnapshot(page, tabId).catch(() => "");
+  }
+
   public async drag(startX: number, startY: number, endX: number, endY: number, steps = 10): Promise<void> {
     const { page } = await this.getActivePage();
     await page.mouse.move(startX, startY);

@@ -64,6 +64,7 @@ Nodes missing from an incremental snapshot are unchanged, and their refs stay va
 - 🔖 **Ref targeting**: pass `[ref=eN]` from the snapshot to click / fill / select / check / hover, including elements inside iframes. A stale ref fails immediately with a hint to use the latest snapshot, instead of hanging until a timeout.
 - ⏱ **Smart settle**: after an action, waits until the navigation it triggered completes, the fetch/XHR requests it started finish, and the DOM has had no structural change for 100 ms. Text-only and inline-style changes (clocks, tickers, carousels) don't hold it up.
 - ✂️ **Incremental snapshots**: action tools return changed nodes, their ancestors and removed nodes. Falls back to the full tree after navigation or when the diff wouldn't be meaningfully smaller.
+- 🩺 **Errors come with the page**: any tool error includes a full snapshot of the current page, so the agent can correct course without spending a call on probing.
 - ⚡ **Script batching**: `browser_run_script` runs a known multi-step flow in a single call.
 - 🎯 **Semantic + coordinate targeting**: semantic or ref targeting for regular pages; coordinate clicks and drags for canvas, games and slider captchas.
 - 🧭 **Built-in usage guidance**: the server sends MCP `instructions` telling any connected agent how to use the tools efficiently.
@@ -123,6 +124,7 @@ Add the same `command` and `args` to the client's MCP settings. For Antigravity,
 | `browser_fill` | `value`, `ref`, `role`, `name`, `label`, `placeholder`, `selector`, `press_enter`, `skip_snapshot` | Fill an input, optionally pressing Enter |
 | `browser_select` | `value`, `ref`, `name`, `label`, `selector`, `testId`, `skip_snapshot` | Choose a dropdown option |
 | `browser_check` | `checked`, `ref`, `name`, `label`, `selector`, `testId`, `skip_snapshot` | Check or uncheck a checkbox / radio |
+| `browser_upload` | `paths`, `ref`, `selector`, `skip_snapshot` | Upload local files. File inputs are usually hidden and absent from snapshots, so the page's only one is used by default; pass `selector` when there are several. Never opens the OS file picker |
 | `browser_hover` | `ref`, `role`, `name`, `text`, `selector`, `testId`, `x`, `y`, `skip_snapshot` | Hover to open menus and tooltips |
 | `browser_press` | `key`, `skip_snapshot` | Press a key such as `Enter`, `Escape`, `Tab`, `ArrowDown` |
 | `browser_scroll` | `direction` (`up`/`down`/`top`/`bottom`), `amount`, `skip_snapshot` | Scroll the page |
@@ -130,7 +132,7 @@ Add the same `command` and `args` to the client's MCP settings. For Antigravity,
 | `browser_set_viewport` | `width`, `height` | Set viewport size (320–3840 × 320–2160) |
 | `browser_screenshot` | `full_page`, `save_path` | PNG screenshot, optionally saved to disk |
 | `browser_evaluate` | `script` | Run JavaScript in the page context |
-| `browser_run_script` | `script` | Run a Playwright script in Node to batch multiple steps. In scope: `page`, `context`, `browser`, `tabId`, `getSnapshot`, `getByRef`, `getByRole`, `getByText`, `getByTestId`, `locator`, `click`, `fill`, `evaluate`, `delay`, `screenshot` |
+| `browser_run_script` | `script` | Run a Playwright script in Node to batch multiple steps whose targets you have already seen in a snapshot. Returning `screenshot()` on its own yields an image. In scope: `page`, `context`, `browser`, `tabId`, `getSnapshot`, `getByRef`, `getByRole`, `getByText`, `getByTestId`, `locator`, `click`, `fill`, `evaluate`, `delay`, `screenshot` |
 | `browser_tabs` | `action` (`list`/`switch`/`close`), `tab_id` | Manage tabs |
 
 **Locator priority**: `ref` > `selector` > `testId` > `role`+`name`/`text` > `label` > `placeholder` > `text` > `role`.
