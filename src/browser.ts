@@ -35,7 +35,6 @@ export class BrowserManager {
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private launching: Promise<{ browser: Browser; context: BrowserContext }> | null = null;
-  private stopWatchdog: (() => void) | null = null;
   private tabs: Map<string, Page> = new Map();
   private pageToId: Map<Page, string> = new Map();
   private activeTabId: string | null = null;
@@ -156,22 +155,37 @@ export class BrowserManager {
       };
     }
 
-    this.browser = await chromium.launch(launchOptions);
-    this.stopWatchdog = startChromeWatchdog();
-
-    this.context = await this.browser.newContext({
-      viewport: { width: 1280, height: 800 },
-      userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    const browser = await chromium.launch(launchOptions);
+    const stopWatchdog = startChromeWatchdog();
+    // Chrome quit or crashed (or closeAll closed it): drop the dead handles so the next call
+    // launches a fresh browser instead of failing with "Target closed" from then on.
+    browser.on("disconnected", () => {
+      stopWatchdog();
+      if (this.browser === browser) this.resetState();
     });
 
+    let context: BrowserContext;
+    try {
+      context = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+      });
+    } catch (err) {
+      // Nothing else holds this browser yet, so it must be closed here or it leaks.
+      await browser.close().catch(() => {});
+      throw err;
+    }
+
     // Listen for popup / new tabs and auto-focus
-    this.context.on("page", (newPage) => {
+    context.on("page", (newPage) => {
       const id = this.registerPage(newPage);
       this.activeTabId = id;
     });
 
-    return { browser: this.browser, context: this.context };
+    this.browser = browser;
+    this.context = context;
+    return { browser, context };
   }
 
   public async getActivePage(): Promise<{ page: Page; tabId: string }> {
@@ -464,16 +478,16 @@ export class BrowserManager {
   }
 
   public async closeAll(): Promise<void> {
-    if (this.context) {
-      await this.context.close().catch(() => {});
-      this.context = null;
-    }
-    if (this.browser) {
-      await this.browser.close().catch(() => {});
-      this.browser = null;
-    }
-    this.stopWatchdog?.();
-    this.stopWatchdog = null;
+    const browser = this.browser;
+    // Reset before awaiting, so a call arriving mid-close launches a new browser rather than
+    // getting the closing one.
+    this.resetState();
+    await browser?.close().catch(() => {});
+  }
+
+  private resetState(): void {
+    this.browser = null;
+    this.context = null;
     this.tabs.clear();
     this.pageToId.clear();
     this.activeTabId = null;

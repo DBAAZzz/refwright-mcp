@@ -70,7 +70,7 @@ Nodes missing from an incremental snapshot are unchanged, and their refs stay va
 - 🧭 **Built-in usage guidance**: the server sends MCP `instructions` telling any connected agent how to use the tools efficiently.
 - 🚀 **Uses your local Chrome**: built on `playwright-core`, auto-detects the installed Chrome — no separate browser download. Picks up the system proxy.
 - 📑 **Multi-tab**: new tabs and popups are tracked and focused automatically; list, switch and close tabs.
-- 🧹 **No orphaned Chrome**: the browser is closed when the client disconnects or the server is signalled; even if the server is `kill -9`ed or crashes, a detached watchdog reaps its Chrome within seconds without touching other instances.
+- 🧹 **No orphaned Chrome**: the browser is closed when the client disconnects or the server is signalled; even if the server is `kill -9`ed or crashes, a detached watchdog reaps its Chrome and temp profile within seconds without touching other instances. An idle browser is closed after a timeout, and one closed from outside is relaunched on the next call.
 
 ---
 
@@ -146,6 +146,7 @@ Add the same `command` and `args` to the client's MCP settings. For Antigravity,
 | Variable | Default | Description |
 |---|---|---|
 | `BROWSER_HEADLESS` | `false` | The browser window is shown by default so you can watch the agent; set `"true"` for headless |
+| `BROWSER_IDLE_TIMEOUT_MINUTES` | `30` | Close the browser after this many minutes without tool calls; the next call launches a fresh one (tabs and logins are not kept). `0` keeps it open |
 | `CHROME_PATH` | auto-detected | Path to a Chrome / Chromium executable |
 | `BROWSER_PROXY` | auto-detected | Proxy server; otherwise `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, then the macOS system proxy |
 | `ARIA_SETTLE_MAX_MS` | `1500` | Max wait after an action |
