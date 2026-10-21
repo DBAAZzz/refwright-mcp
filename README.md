@@ -70,7 +70,7 @@ Removed:
 - 🧭 **自带使用策略**：服务端通过 MCP `instructions` 告诉接入的 Agent 如何高效使用这些工具，任何 MCP 客户端都会收到。
 - 🚀 **复用本机 Chrome**：依赖 `playwright-core`，自动检测本机安装的 Chrome，不需要额外下载浏览器；自动读取系统代理。
 - 📑 **多标签页**：自动接管弹出的新标签页并切换过去，支持列出、切换、关闭标签页。
-- 🧹 **不残留 Chrome 进程**：客户端断开、收到退出信号时会关闭浏览器；即使 MCP 进程被 `kill -9` 或崩溃，独立的守护脚本也会在几秒内清理掉它启动的 Chrome，并且不会影响其他实例的浏览器。
+- 🧹 **不残留 Chrome 进程**：客户端断开、收到退出信号时会关闭浏览器；即使 MCP 进程被 `kill -9` 或崩溃，独立的守护脚本也会在几秒内清理掉它启动的 Chrome，连同它的临时 profile 目录，并且不会影响其他实例的浏览器；空闲超时后也会自动关闭浏览器，被外部关掉后下次调用会重新启动。
 
 ---
 
@@ -146,6 +146,7 @@ claude mcp add refwright -- node /absolute/path/to/refwright-mcp/dist/index.js
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `BROWSER_HEADLESS` | `false` | 默认显示浏览器窗口，方便观察 Agent 操作；设为 `"true"` 使用无头模式 |
+| `BROWSER_IDLE_TIMEOUT_MINUTES` | `30` | 无工具调用超过该时长后关闭浏览器，下次调用时重新启动（标签页与登录状态不保留）；设为 `0` 不自动关闭 |
 | `CHROME_PATH` | 自动检测 | 指定 Chrome / Chromium 可执行文件路径 |
 | `BROWSER_PROXY` | 自动检测 | 指定代理；未设置时依次读取 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 和 macOS 系统代理 |
 | `ARIA_SETTLE_MAX_MS` | `1500` | 动作执行后最多等待多久 |

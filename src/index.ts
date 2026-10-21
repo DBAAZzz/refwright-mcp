@@ -10,17 +10,35 @@ const USAGE_INSTRUCTIONS = `Browser automation driven by ARIA snapshots. To work
 - Action tools (click, fill, select, check, upload, press, hover, scroll, drag) already wait for the page to settle and return an incremental snapshot of what changed. Don't call browser_snapshot after every action; call it only when you need the whole page again.
 - Omitted nodes in an incremental snapshot are unchanged and their refs stay valid. If a ref no longer exists, use one from the latest snapshot.
 - Errors include the current page state. Read it to recover instead of spending a call on probing.
-- The browser persists between tasks and may still be on an earlier page. Don't assume where you are; start from browser_open or the latest snapshot.
+- The browser persists between tasks (until it has been idle for a while) and may still be on an earlier page. Don't assume where you are; start from browser_open or the latest snapshot.
 - Use browser_run_script only for steps whose targets you have already seen in a snapshot. On an unfamiliar page, use the single action tools: each one shows you the resulting page. Inside scripts, wait for a specific element (locator.waitFor()) rather than waitForURL or waitForLoadState('load'), which hang on pages that keep loading.
 - Upload files with browser_upload; don't click upload buttons, which open the OS file picker.
 - Snapshot text is the source of truth. Use screenshots and x/y coordinates only for visual content (canvas, games, images, layout).
 - Pass skip_snapshot: true for intermediate steps whose result you don't need to see.`;
 
 const SHUTDOWN_TIMEOUT_MS = 5000;
+// The server lives as long as the client session, so an idle session would otherwise keep
+// its Chrome open indefinitely. The next call after closing launches a fresh browser.
+// 0 disables; capped at setTimeout's maximum, beyond which it would fire immediately.
+const IDLE_TIMEOUT_MS = Math.min(Number(process.env.BROWSER_IDLE_TIMEOUT_MINUTES ?? 30) * 60_000, 2 ** 31 - 1);
 
 async function main() {
   const browserManager = new BrowserManager();
   const dispatcher = new ToolDispatcher(browserManager);
+
+  let activeCalls = 0;
+  let idleTimer: NodeJS.Timeout | undefined;
+  const trackCall = async <T>(call: () => Promise<T>): Promise<T> => {
+    activeCalls++;
+    clearTimeout(idleTimer);
+    try {
+      return await call();
+    } finally {
+      if (--activeCalls === 0 && IDLE_TIMEOUT_MS > 0) {
+        idleTimer = setTimeout(() => browserManager.closeAll(), IDLE_TIMEOUT_MS).unref();
+      }
+    }
+  };
 
   const server = new McpServer(
     {
@@ -38,26 +56,27 @@ async function main() {
         description: definition.description,
         inputSchema: (definition.parameters as any).shape,
       },
-      async (args: any) => {
-        try {
-          const result = await dispatcher.handleTool(name, args);
-          return result;
-        } catch (error: any) {
-          // Playwright colors its call logs with ANSI codes, which are noise to a model.
-          const reason = (error instanceof Error ? error.message : String(error)).replace(/\x1b\[[0-9;]*m/g, "");
-          const message = `Error executing ${name}: ${reason}`;
-          const pageState = await browserManager.snapshotForError();
-          return {
-            isError: true,
-            content: [
-              {
-                type: "text" as const,
-                text: pageState ? `${message}\n\nCurrent page state:\n${pageState}` : message,
-              },
-            ],
-          };
-        }
-      }
+      (args: any) =>
+        trackCall(async () => {
+          try {
+            const result = await dispatcher.handleTool(name, args);
+            return result;
+          } catch (error: any) {
+            // Playwright colors its call logs with ANSI codes, which are noise to a model.
+            const reason = (error instanceof Error ? error.message : String(error)).replace(/\x1b\[[0-9;]*m/g, "");
+            const message = `Error executing ${name}: ${reason}`;
+            const pageState = await browserManager.snapshotForError();
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text" as const,
+                  text: pageState ? `${message}\n\nCurrent page state:\n${pageState}` : message,
+                },
+              ],
+            };
+          }
+        })
     );
   }
 

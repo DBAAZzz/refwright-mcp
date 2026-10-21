@@ -2,6 +2,7 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const serverEntry = fileURLToPath(new URL("../dist/index.js", import.meta.url));
@@ -11,6 +12,13 @@ const chromeProcessesOf = (serverPid) =>
   execSync(`pgrep -f -- "--refwright-owner=${serverPid}( |$)" || true`).toString().trim().split("\n").filter(Boolean);
 const browserProcessesOf = (serverPid) =>
   chromeProcessesOf(serverPid).filter((pid) => !execSync(`ps -o command= -p ${pid} || true`).toString().includes("--type="));
+const profileDirOf = (serverPid) =>
+  execSync("ps -A -ww -o args=", { maxBuffer: 64 << 20 })
+    .toString()
+    .split("\n")
+    .filter((line) => new RegExp(`--refwright-owner=${serverPid}( |$)`).test(line))
+    .map((line) => /--user-data-dir=(\S+)/.exec(line)?.[1])
+    .find(Boolean);
 const spawned = [];
 // A failing test must not leave servers behind: they would keep the test runner alive.
 after(() => {
@@ -32,9 +40,9 @@ async function waitUntil(condition, timeoutMs) {
 }
 
 /** Starts the server over stdio and returns a minimal JSON-RPC client for it. */
-async function startServer() {
+async function startServer(env = {}) {
   const child = spawn(process.execPath, [serverEntry], {
-    env: { ...process.env, BROWSER_HEADLESS: "true" },
+    env: { ...process.env, BROWSER_HEADLESS: "true", ...env },
     stdio: ["pipe", "pipe", "inherit"],
   });
   spawned.push(child);
@@ -80,14 +88,43 @@ test("closing the client connection shuts down the server and its Chrome", posix
   assert.ok(await waitUntil(() => !isAlive(child.pid) && chromeProcessesOf(child.pid).length === 0, 8000));
 });
 
-test("Chrome is reaped after the server is killed with SIGKILL", posixOnly, async () => {
+test("Chrome and its temp profile are removed after the server is killed with SIGKILL", posixOnly, async () => {
   const { child, callTool } = await startServer();
   await callTool("browser_snapshot");
-  assert.ok(chromeProcessesOf(child.pid).length > 0);
+  const profileDir = profileDirOf(child.pid);
+  assert.ok(profileDir && existsSync(profileDir));
 
   child.kill("SIGKILL");
 
   assert.ok(await waitUntil(() => chromeProcessesOf(child.pid).length === 0, 8000));
+  assert.ok(await waitUntil(() => !existsSync(profileDir), 4000), `${profileDir} was left behind`);
+});
+
+test("a server whose Chrome was killed from outside relaunches it on the next call", posixOnly, async () => {
+  const { child, callTool } = await startServer();
+  await callTool("browser_snapshot");
+  execSync(`pkill -KILL -f -- "--refwright-owner=${child.pid}( |$)"`);
+  await waitUntil(() => browserProcessesOf(child.pid).length === 0, 4000);
+
+  const response = await callTool("browser_snapshot");
+
+  assert.ok(!response.result.isError, response.result.content[0].text);
+  assert.equal(browserProcessesOf(child.pid).length, 1);
+  child.kill("SIGTERM");
+  await waitUntil(() => chromeProcessesOf(child.pid).length === 0, 8000);
+});
+
+test("an idle browser is closed, and the next call launches a new one", posixOnly, async () => {
+  const { child, callTool } = await startServer({ BROWSER_IDLE_TIMEOUT_MINUTES: "0.02" });
+  await callTool("browser_snapshot");
+
+  assert.ok(await waitUntil(() => chromeProcessesOf(child.pid).length === 0, 8000));
+  assert.ok(isAlive(child.pid));
+
+  const response = await callTool("browser_snapshot");
+  assert.ok(!response.result.isError, response.result.content[0].text);
+  child.kill("SIGTERM");
+  await waitUntil(() => chromeProcessesOf(child.pid).length === 0, 8000);
 });
 
 test("killing one server leaves another server's Chrome running", posixOnly, async () => {
